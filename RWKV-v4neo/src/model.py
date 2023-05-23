@@ -53,7 +53,7 @@ T_MAX = int(os.environ["RWKV_T_MAX"])  # TAKES LOTS OF VRAM!
 from torch.utils.cpp_extension import load
 
 if os.environ["RWKV_FLOAT_MODE"] == "bf16":
-    wkv_cuda = load(name=f"wkv_{T_MAX}_bf16", sources=["cuda/wkv_op_bf16.cpp", "cuda/wkv_cuda_bf16.cu"], verbose=True, extra_cuda_cflags=["-t 4", "-std=c++17", "-res-usage", "--maxrregcount 60", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization", f"-DTmax={T_MAX}"])
+    wkv_cuda = load(name=f"wkv_{T_MAX}_bf16", sources=["./src/trainers/RWKV-LM-LoRA/RWKV-v4neo/cuda/wkv_op_bf16.cpp", "./src/trainers/RWKV-LM-LoRA/RWKV-v4neo/cuda/wkv_cuda_bf16.cu"], verbose=True, extra_cuda_cflags=["-t 4", "-std=c++17", "-res-usage", "--maxrregcount 60", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization", f"-DTmax={T_MAX}"])
     class WKV(torch.autograd.Function):
         @staticmethod
         def forward(ctx, B, T, C, w, u, k, v):
@@ -87,7 +87,7 @@ if os.environ["RWKV_FLOAT_MODE"] == "bf16":
             gu = torch.sum(gu, dim=0)
             return (None, None, None, gw, gu, gk, gv)
 else:
-    wkv_cuda = load(name=f"wkv_{T_MAX}", sources=["cuda/wkv_op.cpp", "cuda/wkv_cuda.cu"], verbose=True, extra_cuda_cflags=["-res-usage", "--maxrregcount 60", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization", f"-DTmax={T_MAX}"])
+    wkv_cuda = load(name=f"wkv_{T_MAX}", sources=["./src/trainers/RWKV-LM-LoRA/RWKV-v4neo/cuda/wkv_op.cpp", "./src/trainers/RWKV-LM-LoRA/RWKV-v4neo/cuda/wkv_cuda.cu"], verbose=True, extra_cuda_cflags=["-res-usage", "--maxrregcount 60", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization", f"-DTmax={T_MAX}"])
     class WKV(torch.autograd.Function):
         @staticmethod
         def forward(ctx, B, T, C, w, u, k, v):
@@ -590,7 +590,7 @@ class RWKV(pl.LightningModule):
             logits = self(idx)
             if sum_mask == mask.shape[0]:
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-                # print('rank', self.global_rank, 'loss', loss.item())
+                print('rank', self.global_rank, 'loss', loss.item(), flush=True)
             else:
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), reduction='none')
                 # loss_raw = loss
@@ -606,7 +606,7 @@ class RWKV(pl.LightningModule):
                 #             tmp += str(idx.view(-1)[i].item()) + ','
                 #             sss += loss_raw.view(-1)[i].float().item()
                 #             ccc += 1
-                #     print('rank', self.global_rank, 'loss', loss.item(), 'lavg', sss / ccc)#, 'tmp', tmp, 'input', idx)
+                print('rank', self.global_rank, 'loss', loss.item(), flush=True)#, 'tmp', tmp, 'input', idx)
 
         return L2Wrap.apply(loss, logits)
 
@@ -614,6 +614,7 @@ class RWKV(pl.LightningModule):
         all = self.all_gather(batch_parts)
         if self.trainer.is_global_zero:
             self.trainer.my_loss_all = all
+            return all
 
     def generate_init_weight(self):
         print(

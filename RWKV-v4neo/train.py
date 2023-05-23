@@ -113,8 +113,16 @@ if __name__ == "__main__":
     parser.add_argument("--lora_dropout", default=0.01, type=float)
     parser.add_argument("--lora_parts", default="att,ln,time", type=str)
 
-    parser = Trainer.add_argparse_args(parser)
+
+    parser.add_argument("--accelerator", default="gpu", type=str)
+    parser.add_argument("--devices", default=1, type=int)
+    parser.add_argument("--precision", default="bf16", type=str)
+    parser.add_argument("--strategy", default="deepspeed_stage_2", type=str)
+    parser.add_argument("--num_nodes", default=1, type=int)
+    parser.add_argument('--MERGERAVENMODELS', default=False)
+
     args = parser.parse_args()
+    parser = Trainer(accelerator=args.accelerator, devices=args.devices, strategy=args.strategy)
 
     ########################################################################################################
 
@@ -279,9 +287,9 @@ if __name__ == "__main__":
     ########################################################################################################
 
     from src.trainer import train_callback, generate_init_weight
-    from src.dataset import MyDataset
+    from src.dataset import MyDataset, OnDiskDataset
 
-    train_data = MyDataset(args)
+    train_data = OnDiskDataset(args) #MyDataset(args)
     args.vocab_size = train_data.vocab_size
 
     if args.data_type == 'wds_img':
@@ -324,6 +332,7 @@ if __name__ == "__main__":
         args.load_model = init_weight_name
 
     rank_zero_info(f"########## Loading {args.load_model}... ##########")
+
     try:
         load_dict = torch.load(args.load_model, map_location="cpu")
     except:
@@ -338,20 +347,57 @@ if __name__ == "__main__":
             rank_zero_info(f"Trying {args.load_model}")
             load_dict = torch.load(args.load_model, map_location="cpu")
 
+    if args.MERGERAVENMODELS:
+        pass
+        # print('Merging Pileplus into Raven models by avg value of vector', flush=True)
+        # with torch.no_grad():
+        #     load_dict_2 = torch.load("./aimodels/RWKV-4-PilePlus-1B5-20230512-1659-274Gtokens-ctx4096.pth", map_location="cpu")
+        
+        # count = 0
+        # for k, v in load_dict.items():
+        #     count_vector = 0
+        
+        #     for idx in range(load_dict[k].shape[0]):
+        #         load_dict[k][idx] = ( load_dict[k][idx] + load_dict_2[k][idx] ) / 2
+            
+        #     #     breakpoint()
+        #     #     if load_dict[k][idx] == load_dict_2[k][idx]:
+        #     #         count_vector += 1
+
+        #     # try:
+        #     #     assert count_vector < load_dict[k].shape[0], f"Layer {count} - {k} has the same value between the models"
+        #     # except Exception as e:
+        #     #     print(e, flush=True)
+        #     count += 1
+        # print('Finished merging with pileplus', flush=True)
+        # import gc, time
+        # del load_dict_2
+        # gc.collect()
+        # time.sleep(2)
+
+    
     if args.load_partial == 1:
         load_keys = load_dict.keys()
         for k in model.state_dict():
             if k not in load_keys:
                 load_dict[k] = model.state_dict()[k]
     # If using LoRA, the LoRA keys might be missing in the original model
+
+    print("AICIIIII", flush=True)
     model.load_state_dict(load_dict, strict=(not args.lora))
     if os.path.isfile(args.lora_load):
         model.load_state_dict(torch.load(args.lora_load, map_location="cpu"),
                               strict=False)
 
-    trainer = Trainer.from_argparse_args(
-        args,
-        callbacks=[train_callback(args)],
+    # trainer = Trainer.from_argparse_args(
+    #     args,
+    #     callbacks=[train_callback(args)],
+    # )
+
+    trainer = Trainer(
+        accelerator=args.accelerator, devices=args.devices,
+        precision=args.precision, strategy=args.strategy, callbacks=[train_callback(args)],
+        max_epochs=5,  logger=False
     )
 
     if trainer.global_rank == 0:
@@ -368,6 +414,6 @@ if __name__ == "__main__":
         trainer.strategy.config["zero_optimization"]["reduce_bucket_size"] = args.ds_bucket_mb * 1000 * 1000
 
     # must set shuffle=False, persistent_workers=False (because worker is in another thread)
-    data_loader = DataLoader(train_data, shuffle=False, pin_memory=True, batch_size=args.micro_bsz, num_workers=1, persistent_workers=False, drop_last=True)
+    data_loader = DataLoader(train_data, shuffle=True, pin_memory=True, batch_size=args.micro_bsz, num_workers=1, persistent_workers=False, drop_last=True)
 
     trainer.fit(model, data_loader)

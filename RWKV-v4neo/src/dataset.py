@@ -11,6 +11,91 @@ from .binidx import MMapIndexedDataset
 from .utils import MaybeIsPrime
 
 
+
+import shelve
+from src.utils import TOKENIZER
+class OnDiskDataset(Dataset):
+    def __init__(self, args) -> None:
+        self.args = args
+        self.file = shelve.open(args.data_file)
+
+        self.data = {''}
+        self.last_key = 0
+        for k, v in self.file.items():
+            self.data.update(set(v))
+            if int(k) > self.last_key:
+                self.last_key = int(k)
+
+        unique = sorted(list(set(self.data)))
+        self.vocab_size = args.vocab_size
+
+        xx = 0
+        xxObj = {}
+        for u in unique:
+            xxObj[xx] = u
+            xx += 1
+        with open(f"{args.proj_dir}/vocab.json", "w", encoding="utf-16le") as vocab_file:
+            vocab_file.write(json.dumps(xxObj, ensure_ascii=False))
+        self.data_size = len(self.data)
+        rank_zero_info(f"Data has {self.data_size} tokens, {self.vocab_size} vocab size.")
+            
+        self.stoi = {ch: i for i, ch in enumerate(unique)}
+        self.itos = {i: ch for i, ch in enumerate(unique)}
+        WORD_NAME = [
+            "./src/trainers/RWKV-LM-LoRA/RWKV-v4neo/20B_tokenizer.json",
+            "./src/trainers/RWKV-LM-LoRA/RWKV-v4neo/20B_tokenizer.json",
+        ]  # [vocab, vocab] for Pile model
+        UNKNOWN_CHAR = None
+        self.tokenizer = TOKENIZER(WORD_NAME, UNKNOWN_CHAR=UNKNOWN_CHAR)
+        self.tokenizer.tokenizer.pad_token = 1
+        #self.tokenizer.tokenizer.add_special_tokens({'pad_token': '<|padding|>'})
+        
+
+    def __len__(self):
+        return self.last_key
+
+    def __getitem__(self, idx):
+        ctx_len = self.args.ctx_len
+        req_len = ctx_len + 1
+        data = self.file[str(idx)]
+
+        # max_len = len(data)
+
+        # inpt = data.split('Alice:')[0]
+        # output = f"Alice:{data.split('Alice:')[1]}"
+        # assert len(output) > len('Alice:')
+        
+        # start_index = len(inpt) + min(len(output), 20)
+        
+        # cutoff_index = random.randint(start_index, max_len)
+        
+        # data = data[:cutoff_index]
+
+        # data = self.tokenizer.tokenizer.encode(data, padding="max_length", max_length=self.args.ctx_len, truncation=True)
+        # x = torch.tensor(data[:-1], dtype=torch.long)
+        # y = torch.tensor(data[1:], dtype=torch.long)
+        
+        # return x,  y
+
+        # if idx > 0:
+        #     data += self.file[str(idx)]
+        
+        
+        data = self.tokenizer.tokenizer.encode(data, padding="do_not_pad", max_length=self.args.ctx_len, truncation=True)
+        x = torch.tensor(data[:-1], dtype=torch.long)
+        y = torch.tensor(data[1:], dtype=torch.long)
+
+
+        pad_x = torch.ones(self.args.ctx_len, device=x.device, dtype=x.dtype)
+        pad_x[:x.size(0)] = x
+
+        pad_y = torch.ones(self.args.ctx_len, device=y.device, dtype=y.dtype)
+        pad_y[:y.size(0)] = y
+        
+        return pad_x,  pad_y
+
+
+
 class MyDataset(Dataset):
     def __init__(self, args):
         self.args = args
@@ -92,6 +177,9 @@ class MyDataset(Dataset):
             rank_zero_info(f"Data has {self.data_size} tokens, {self.vocab_size} vocab size.")
             self.stoi = {ch: i for i, ch in enumerate(unique)}
             self.itos = {i: ch for i, ch in enumerate(unique)}
+            self.vocab_size = 50277
+            self.global_rank = 0
+            self.world_size = self.data_size
 
     def __len__(self):
         return self.args.epoch_steps * self.args.micro_bsz
@@ -99,7 +187,7 @@ class MyDataset(Dataset):
     def __getitem__(self, idx):
         args = self.args
         rank = self.global_rank
-        epoch = self.real_epoch
+        epoch = 1
         world_size = self.world_size
         # print(f"epoch {epoch} idx {idx} rank {rank}/{world_size}")
 

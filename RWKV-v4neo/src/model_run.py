@@ -42,6 +42,24 @@ class RWKV_RNN(MyModule):
 
         with torch.no_grad():
             w = torch.load(args.MODEL_NAME + '.pth', map_location='cpu')
+
+            if args.MERGERAVENMODELS:
+                print('Merging Pileplus into Raven models by avg value of vector', flush=True)
+                load_dict_2 = torch.load("./aimodels/RWKV-4-PilePlus-1B5-20230512-1659-274Gtokens-ctx4096.pth", map_location="cpu")
+                
+                count = 0
+                for k, v in w.items():
+                    count_vector = 0
+                
+                    for idx in range(w[k].shape[0]):
+                        w[k][idx] = ( w[k][idx] + load_dict_2[k][idx] ) / 2
+                    
+                    count += 1
+                print('Finished merging with pileplus', flush=True)
+                import time
+                del load_dict_2
+                gc.collect()
+                time.sleep(2)
             if args.lora_r > 0:
                 # merge LoRA-only slim checkpoint into the main weights
                 w_lora = torch.load(args.MODEL_LORA + '.pth', map_location='cpu')

@@ -1,11 +1,14 @@
+
 ########################################################################################################
 # The RWKV Language Model - https://github.com/BlinkDL/RWKV-LM
 ########################################################################################################
 
 print('Loading...')
-from src.model_run import RWKV_RNN
 import numpy as np
 import os, copy, types, gc, sys
+os.environ['RWKV_JIT_ON'] = "1"
+
+from src.model_run import RWKV_RNN
 import torch
 from src.utils import TOKENIZER
 try:
@@ -20,11 +23,12 @@ np.set_printoptions(precision=4, suppress=True, linewidth=200)
 CHAT_LANG = 'English' # English Chinese
 
 WORD_NAME = [
-    "20B_tokenizer.json",
-    "20B_tokenizer.json",
+    "./src/trainers/RWKV-LM-LoRA/RWKV-v4neo/20B_tokenizer.json",
+    "./src/trainers/RWKV-LM-LoRA/RWKV-v4neo/20B_tokenizer.json",
 ]  # [vocab, vocab] for Pile model
 UNKNOWN_CHAR = None
 tokenizer = TOKENIZER(WORD_NAME, UNKNOWN_CHAR=UNKNOWN_CHAR)
+
 
 args = types.SimpleNamespace()
 args.RUN_DEVICE = "cuda"  # 'cpu' (already very fast) // 'cuda'
@@ -35,15 +39,17 @@ args.pre_ffn = 0
 args.grad_cp = 0
 args.my_pos_emb = 0
 
-args.MODEL_NAME = '/home/blealtancao/rwkv-models/RWKV-4-Pile-14B-20230227-ctx4096-test503'
-args.n_layer = 40
-args.n_embd = 5120
-args.ctx_len = 1024
+args.MODEL_NAME = './aimodels/RWKV-4-Raven-1B5-v12-Eng98%-Other2%-20230520-ctx4096'
+args.n_layer = 24
+args.n_embd = 2048
+args.ctx_len = 8096 #1024
 
 # Modify this to use LoRA models; lora_r = 0 will not use LoRA weights.
-args.MODEL_LORA = '/home/blealtancao/rwkv-models/lora-full-1e-4/rwkv-33'
-args.lora_r = 0
-args.lora_alpha = 16
+args.MODEL_LORA = './aimodels/rwkv-adapter-4/rwkv-0'
+args.lora_r = 8
+args.lora_alpha = 32
+
+args.MERGERAVENMODELS = False
 
 # args.MODEL_NAME = '/fsx/BlinkDL/HF-MODEL/rwkv-4-pile-7b/RWKV-4-Pile-7B-20221115-8047'
 # args.n_layer = 32
@@ -56,8 +62,8 @@ args.lora_alpha = 16
 # args.ctx_len = 1024
 
 if CHAT_LANG == 'English':
-    user = "User"
-    bot = "Bot"
+    user = "Bob"
+    bot = "Alice"
     interface = ":"
 
     # The following is a verbose and detailed conversation between an AI assistant called {bot}, and a human user called {user}. {bot} is intelligent, knowledgeable, wise and polite.
@@ -85,6 +91,33 @@ The following is a verbose and detailed conversation between an AI assistant cal
 {user}{interface} wat is lhc
 
 {bot}{interface} LHC is a high-energy particle collider, built by CERN, and completed in 2008. They used it to confirm the existence of the Higgs boson in 2012.
+
+'''
+
+    init_prompt = f'''
+The following is a verbose and detailed conversation between an AI assistant called {bot}, and a human user called {user}. {bot} is intelligent, knowledgeable, wise and polite.
+
+{user}{interface} User Query: moen handshower
+Act like a search engine. You will receive a user query and will have to provide the user with a list of relevant search results. The results will have to fit the user query but can also be varied while still catering to the user query.
+
+{bot}{interface} Koolatron 700 gal. Pond Kit with 4-Piece Lighting;;Titan Lighting Copley Pond Collection 3-Light Satin Nickel Mini Pendant;;Titan Lighting Copley Pond Collection 6-Light Satin Nickel Mini Pendant;;Titan Lighting Copley Pond Collection 1-Light Satin Nickel Mini Pendant;;Moonrays Low Voltage 20-Watt Grey Outdoor Rock Spotlight;;Titan Lighting Copley Pond Collection 6-Light Satin Nickel Mini Pendant;;Titan Lighting Copley Pond Collection 3-Light Satin Nickel Mini Pendant;;Alpine 5 Sockets Lighting Cable 25 ft. and 14 Gauge;;Titan Lighting Copley Pond Collection 6-Light Satin Nickel Mini Pendant;;Titan Lighting Copley Pond Collection 1-Light Satin Nickel LED Mini Pendant;;Titan Lighting Copley Pond Collection 3-Light Satin Nickel Mini Pendant;;Titan Lighting Copley Pond Collection 6-Light Satin Nickel Mini Pendant;;Titan Lighting Copley Pond Collection 6-Light Satin Nickel Mini Pendant.
+
+{user}{interface} The customer is looking for a smartphone with a large display and a long battery life.
+Generate a product recommendation for a customer looking for a new smartphone.
+
+{bot}{interface} Based on the customer's requirements, we recommend the Samsung Galaxy Note20 Ultra with a 6.9-inch display and a 4500mAh battery.
+
+{user}{interface} i need a good suit for business.
+
+{bot}{interface} Based on your interests and occupation, here are some good suit options to consider:The Tom Ford Suit Collection, Off-White Men's Slim-Homed Suit Collection, and Prada Made Men's Suit Collection which are gepected to fit your budget and preferences.
+
+{user}{interface} I want to decorate my home, what's the best way to get started?
+
+{bot}{interface} Start by identifying your personal style and the overall aesthetic you want to achieve in your home. Then, consider what types of furniture and decor you want to include, and make a plan for how you want to arrange them. It's also helpful to create a budget and stick to it to ensure that your decorating is affordable and sustainable.
+
+{user}{interface} Does a brown lamp fit with the colors of a blue room ?
+
+{bot}{interface} Brown and blue are complementary colors, meaning they are opposite each other on the color wheel. Therefore, the answer to the question is maybe, and it depends on the specific shades of brown and blue and personal preferences.
 
 '''
     HELP_MSG = '''Commands:
@@ -194,7 +227,7 @@ srv_list = ['dummy_server']
 for s in srv_list:
     save_all_stat(s, 'chat', out)
 
-print(f'### prompt ###\n[{tokenizer.tokenizer.decode(model_tokens)}]\n')
+print(f'### prompt ###\n[{tokenizer.tokenizer.decode(model_tokens, skip_special_tokens=True)}]\n')
 
 def reply_msg(msg):
     print(f'{bot}{interface} {msg}\n')
@@ -205,12 +238,12 @@ def on_message(message):
     srv = 'dummy_server'
 
     msg = message.replace('\\n','\n').strip()
-    if len(msg) > 1000:
+    if len(msg) > 3000:
         reply_msg('your message is too long (max 1000 tokens)')
         return
 
-    x_temp = 1.0
-    x_top_p = 0.85
+    x_temp = 1.8
+    x_top_p = 0.8
     if ("-temp=" in msg):
         x_temp = float(msg.split("-temp=")[1].split(" ")[0])
         msg = msg.replace("-temp="+f'{x_temp:g}', "")
@@ -272,7 +305,7 @@ def on_message(message):
 
         begin = len(model_tokens)
         out_last = begin
-        for i in range(150):
+        for i in range(500):
             token = tokenizer.sample_logits(
                 out,
                 model_tokens,
@@ -286,7 +319,7 @@ def on_message(message):
             else:
                 out = run_rnn([token])
             
-            xxx = tokenizer.tokenizer.decode(model_tokens[out_last:])
+            xxx = tokenizer.tokenizer.decode(model_tokens[out_last:], skip_special_tokens=True)
             if '\ufffd' not in xxx:
                 print(xxx, end='', flush=True)
                 out_last = begin + i + 1
@@ -320,7 +353,7 @@ def on_message(message):
             elif i <= 130:
                 newline_adj = 0
             else:
-                newline_adj = (i - 130) * 0.25 # MUST END THE GENERATION
+                newline_adj = (i - 200) * 0.25 # MUST END THE GENERATION
             token = tokenizer.sample_logits(
                 out,
                 model_tokens,
@@ -331,12 +364,12 @@ def on_message(message):
             )
             out = run_rnn([token], newline_adj=newline_adj)
 
-            xxx = tokenizer.tokenizer.decode(model_tokens[out_last:])
+            xxx = tokenizer.tokenizer.decode(model_tokens[out_last:], skip_special_tokens=True)
             if '\ufffd' not in xxx:
                 print(xxx, end='', flush=True)
                 out_last = begin + i + 1
             
-            send_msg = tokenizer.tokenizer.decode(model_tokens[begin:])
+            send_msg = tokenizer.tokenizer.decode(model_tokens[begin:], skip_special_tokens=True)
             if '\n\n' in send_msg:
                 send_msg = send_msg.strip()
                 break

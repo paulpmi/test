@@ -19,6 +19,7 @@ class train_callback(pl.Callback):
         super().__init__()
         self.args = args
 
+
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         args = self.args
         # if args.cuda_cleanup > 0:
@@ -77,8 +78,21 @@ class train_callback(pl.Callback):
                         save_code=False,
                     )
                     trainer.my_wandb = wandb
+                    
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        epoch = trainer.current_epoch
+        global_step = trainer.global_step
+
+        
+        if global_step % 1000 == 0:
+            to_save_dict = pl_module.state_dict()
+            my_save(
+                to_save_dict,
+                f"{self.args.proj_dir}/rwkv-{self.args.epoch_begin + trainer.current_epoch}.pth",
+            )
+            
+
         args = self.args
         if trainer.is_global_zero:  # logging
             t_now = time.time_ns()
@@ -93,7 +107,7 @@ class train_callback(pl.Callback):
             except:
                 pass
             trainer.my_time_ns = t_now
-            trainer.my_loss = trainer.my_loss_all.float().mean().item()
+            trainer.my_loss = outputs['loss'].float().mean().item()
             trainer.my_loss_sum += trainer.my_loss
             trainer.my_loss_count += 1
             trainer.my_epoch_loss = trainer.my_loss_sum / trainer.my_loss_count
@@ -118,8 +132,7 @@ class train_callback(pl.Callback):
 
     def on_train_epoch_start(self, trainer, pl_module):
         args = self.args
-        dataset = trainer.train_dataloader.dataset.datasets
-        assert "MyDataset" in str(dataset)
+        dataset = trainer.train_dataloader.dataset#.datasets
         dataset.global_rank = trainer.global_rank
         dataset.real_epoch = int(args.epoch_begin + trainer.current_epoch)
         dataset.world_size = trainer.world_size
@@ -156,8 +169,8 @@ class train_callback(pl.Callback):
                     )
                 except Exception as e:
                     print('Error\n\n', e, '\n\n')
-            trainer.my_log.write(f"{args.epoch_begin + trainer.current_epoch} {trainer.my_epoch_loss:.6f} {math.exp(trainer.my_epoch_loss):.4f} {trainer.my_lr:.8f} {datetime.datetime.now()} {trainer.current_epoch}\n")
-            trainer.my_log.flush()
+            #trainer.my_log.write(f"{args.epoch_begin + trainer.current_epoch} {trainer.my_epoch_loss:.6f} {math.exp(trainer.my_epoch_loss):.4f} {trainer.my_lr:.8f} {datetime.datetime.now()} {trainer.current_epoch}\n")
+            #trainer.my_log.flush()
 
             trainer.my_loss_sum = 0
             trainer.my_loss_count = 0
